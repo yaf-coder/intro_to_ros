@@ -19,7 +19,8 @@ setup(
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
-        'console_scripts': [
+        'console_scripts': ['publisher = intro_to_ros.publisher:main',
+'subscriber = intro_to_ros.subscriber:main',
         ],
     },
 )
