@@ -1,74 +1,76 @@
-#!/usr/bin/env python3
-import time
+#!/usr/bin/env python
+
+from time import sleep
+
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, QoSHistoryPolicy, QoSReliabilityPolicy, QoSDurabilityPolicy
-from sensor_msgs.msg import BatteryState
-from sensor_msgs.msg import Imu
+from std_srvs.srv import SetBool
 
-from mavros_msgs.msg import RCIn
 
-import numpy as np
+class ArmingDisarmingNode(Node):
+    done = False
 
-class Bluerov2_Sensors(Node):
     def __init__(self):
-        super().__init__("battery_subscriber")
-        qos_profile = QoSProfile(
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=10,
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            durability=QoSDurabilityPolicy.VOLATILE
-        )
-        self.subscriber = self.create_subscription(
-            BatteryState,
-            "/mavros/battery",
-            self.callback,
-            qos_profile
-        )
-        self.subscriber2 = self.create_subscription(
-            RCIn,
-            "/mavros/rc/in",
-            self.callback2,
-            qos_profile
-        )
-        self.subscriber3 = self.create_subscription(
-            mavros_msgs/MAVLINK,
-            "/mavros/imu/data",
-            self.callback2,
-            qos_profile
-        )
-        self.get_logger().info("starting subscriber nodes")
-        time.sleep(1)
+        super().__init__("arming_disarming_node")
 
-    def callback(self, msg):
-        self.get_logger().info(f"BatteryState: {msg.voltage}")
-        self.battery = msg.voltage
-        self.check_battery()
- 
-    def callback2(self, msg):
-        self.get_logger().info(f"Imu: {msg}")
-        self.IMU = msg
+        self.arming_client = self.create_client(SetBool, "bluerov2/arming")
 
-    def check_battery(self):
-        if self.battery > 12:
-            return
-        self.get_logger().info("voltage below safe!!!")
-        return
-            
+        while not self.arming_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info("BlueROV2 arming service not available, waiting...")
+
+    def dance_for_me(self):
+        # Arm
+        arm_future = self._arm()
+        rclpy.spin_until_future_complete(self, arm_future)
+        self.get_logger().info("Armed!")
+
+        # Dance for me for 10 seconds
+        sleep(60)
+
+        # Disarm
+        disarm_future = self._disarm()
+        rclpy.spin_until_future_complete(self, disarm_future)
+        self.get_logger().info("Disarmed!")
+
+        self.done = True
+
+    def _arm(self):
+        self.get_logger().info(f"Arming...")
+        future = self.arming_client.call_async(SetBool.Request(data=True))
+        return future
+
+    def _disarm(self):
+        self.get_logger().info(f"Disarming...")
+        future = self.arming_client.call_async(SetBool.Request(data=False))
+        return future
+
+    def destroy_node(self):
+        disarm_future = self._disarm()
+        rclpy.spin_until_future_complete(self, disarm_future)
+        self.get_logger().info("Disarmed before shutting down the node")
+        super().destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Bluerov2_Sensors()
+    armingNode = ArmingDisarmingNode()
+    # danceNode = DanceNode()
 
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        print("\nKeyboardInterrupt received, shutting down...")
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        armingNode.dance_for_me()
 
-if __name__=="__main__":
+        while rclpy.ok():
+            # rclpy.spin_once(danceNode)
+            rclpy.spin_once(armingNode)
+            if armingNode.done:
+                break
+    except KeyboardInterrupt:
+        pass
+    finally:
+        armingNode.destroy_node()
+        # danceNode.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
     main()
